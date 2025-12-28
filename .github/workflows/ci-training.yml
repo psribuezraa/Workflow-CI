@@ -96,7 +96,7 @@ jobs:
       - name: Download trained model
         uses: actions/download-artifact@v4
         with:
-          name: trained-model
+          name: mlflow-artifacts
           path: model-artifacts/
       
       - name: Set up Python
