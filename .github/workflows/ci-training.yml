@@ -1,0 +1,161 @@
+name: CI Training Pipeline
+
+# ================================================================
+# TRIGGER: Kapan workflow ini berjalan
+# ================================================================
+on:
+  # Trigger 1: Push ke branch main dengan perubahan di MLProject
+  push:
+    branches: [main]
+    paths:
+      - 'MLProject/**'
+  
+  # Trigger 2: Manual trigger dari GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      n_estimators:
+        description: 'Number of trees in Random Forest'
+        required: false
+        default: '100'
+      max_depth:
+        description: 'Maximum depth of trees (0 for unlimited)'
+        required: false
+        default: '10'
+
+# ================================================================
+# JOB 1: TRAIN MODEL
+# ================================================================
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Checkout code dari repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # Step 2: Setup Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      # Step 3: Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install mlflow pandas scikit-learn numpy matplotlib seaborn
+      
+      # Step 4: Run training dengan parameter dari input atau default
+      - name: Run MLflow Training
+        working-directory: MLProject
+        run: |
+          python modelling.py \
+            --n_estimators ${{ github.event.inputs.n_estimators || 100 }} \
+            --max_depth ${{ github.event.inputs.max_depth || 10 }} \
+            --data_path preprocessed_data.csv
+      
+      # Step 5: Upload MLflow artifacts (SKILLED requirement)
+      - name: Upload MLflow Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlflow-artifacts
+          path: MLProject/mlruns/
+          retention-days: 30
+      
+      # Step 6: Upload trained model sebagai artifact terpisah
+      - name: Upload Trained Model
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-model
+          path: MLProject/mlruns/**/artifacts/model/
+          retention-days: 30
+
+  # ================================================================
+  # JOB 2: BUILD DOCKER (ADVANCE requirement)
+  # ================================================================
+  build-docker:
+    needs: train  # Tunggu job train selesai
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'  # Hanya di branch main
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # Download model artifact dari job train
+      - name: Download trained model
+        uses: actions/download-artifact@v4
+        with:
+          name: trained-model
+          path: model-artifacts/
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      - name: Install MLflow
+        run: pip install mlflow
+      
+      # Login ke Docker Hub menggunakan secrets
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      # Build Docker image menggunakan mlflow models build-docker
+      - name: Build and Push Docker Image
+        run: |
+          # Find the model path
+          MODEL_PATH=$(find model-artifacts -name "MLmodel" -type f | head -1 | xargs dirname)
+          echo "Found model at: $MODEL_PATH"
+          
+          if [ -n "$MODEL_PATH" ]; then
+            # Build Docker image dengan mlflow
+            mlflow models build-docker -m "$MODEL_PATH" -n "ezrapsribu/telco-churn-model:latest"
+            
+            # Push ke Docker Hub
+            docker push ezrapsribu/telco-churn-model:latest
+            
+            # Tag dengan timestamp untuk versioning
+            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+            docker tag ezrapsribu/telco-churn-model:latest ezrapsribu/telco-churn-model:$TIMESTAMP
+            docker push ezrapsribu/telco-churn-model:$TIMESTAMP
+            
+            echo "✅ Docker image pushed to Docker Hub!"
+            echo "- ezrapsribu/telco-churn-model:latest"
+            echo "- ezrapsribu/telco-churn-model:$TIMESTAMP"
+          else
+            echo "⚠️ No model found, skipping Docker build"
+            exit 1
+          fi
+
+  # ================================================================
+  # JOB 3: COMMIT ARTIFACTS KE REPOSITORY (SKILLED requirement)
+  # ================================================================
+  commit-artifacts:
+    needs: train
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download MLflow artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mlflow-artifacts
+          path: artifacts/
+      
+      # Commit artifacts ke repository
+      - name: Commit artifacts to repository
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add artifacts/
+          git diff --quiet && git diff --staged --quiet || git commit -m "Auto-update: Training artifacts from CI [skip ci]"
+          git push
