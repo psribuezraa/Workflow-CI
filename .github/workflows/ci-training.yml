@@ -54,22 +54,31 @@ jobs:
             --n_estimators ${{ github.event.inputs.n_estimators || 100 }} \
             --max_depth ${{ github.event.inputs.max_depth || 10 }} \
             --data_path preprocessed_data.csv
+      # Step 5: List generated files for debugging
+      - name: List MLflow outputs
+        working-directory: MLProject
+        run: |
+          echo "=== Listing mlruns directory ==="
+          find mlruns -type f -name "MLmodel" 2>/dev/null || echo "No MLmodel files found"
+          ls -la mlruns/ || echo "mlruns directory not found"
       
-      # Step 5: Upload MLflow artifacts (SKILLED requirement)
+      # Step 6: Upload MLflow artifacts (SKILLED requirement)
       - name: Upload MLflow Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: mlflow-artifacts
           path: MLProject/mlruns/
           retention-days: 30
+          if-no-files-found: warn
       
-      # Step 6: Upload trained model sebagai artifact terpisah
+      # Step 7: Upload trained model (same as mlruns for reliability)
       - name: Upload Trained Model
         uses: actions/upload-artifact@v4
         with:
           name: trained-model
-          path: MLProject/mlruns/**/artifacts/model/
+          path: MLProject/mlruns/
           retention-days: 30
+          if-no-files-found: error
 
   # ================================================================
   # JOB 2: BUILD DOCKER (ADVANCE requirement)
