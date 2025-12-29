@@ -46,14 +46,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install mlflow pandas scikit-learn numpy matplotlib seaborn
       
-      # Step 4: Run training dengan parameter dari input atau default
-      - name: Run MLflow Training
+      # Step 4: Run training dengan mlflow run (MLflow Project requirement)
+      - name: Run MLflow Project Training
         working-directory: MLProject
         run: |
-          python modelling.py \
-            --n_estimators ${{ github.event.inputs.n_estimators || 100 }} \
-            --max_depth ${{ github.event.inputs.max_depth || 10 }} \
-            --data_path preprocessed_data.csv
+          # Run MLflow Project - ini akan menghasilkan run ID
+          mlflow run . \
+            -P n_estimators=${{ github.event.inputs.n_estimators || 100 }} \
+            -P max_depth=${{ github.event.inputs.max_depth || 10 }} \
+            -P data_path=preprocessed_data.csv \
+            --experiment-name "Workflow-CI-Training"
+      
       # Step 5: List generated files for debugging
       - name: List MLflow outputs
         working-directory: MLProject
